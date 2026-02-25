@@ -3,7 +3,12 @@
 set -e
 # set -x
 
-source config_local.sh
+CONFIG_FILE=${CONFIG_FILE:-config_local.sh}
+if [ ! -f "$CONFIG_FILE" ]; then
+  echo "Config file not found: $CONFIG_FILE"
+  exit 1
+fi
+source "$CONFIG_FILE"
 
 INDEX_PREFIX_PATH="${PREFIX}_M${M}_R${R}_L${BUILD_L}_B${B}/"
 MEM_SAMPLE_PATH="${INDEX_PREFIX_PATH}SAMPLE_RATE_${MEM_RAND_SAMPLING_RATE}/"
@@ -187,6 +192,7 @@ case $2 in
           for T in ${T_LIST[@]}
           do
             SEARCH_LOG=${INDEX_PREFIX_PATH}search/search_SQ${USE_SQ}_K${K}_CACHE${CACHE}_BW${BW}_T${T}_MEML${MEM_L}_MEMK${MEM_TOPK}_MEM_USE_FREQ${MEM_USE_FREQ}_PS${USE_PAGE_SEARCH}_USE_RATIO${PS_USE_RATIO}_GP_USE_FREQ{$GP_USE_FREQ}_GP_LOCK_NUMS${GP_LOCK_NUMS}_GP_CUT${GP_CUT}.log
+            SEARCH_CSV=${INDEX_PREFIX_PATH}search/search_SQ${USE_SQ}_K${K}_CACHE${CACHE}_BW${BW}_T${T}_MEML${MEM_L}_MEMK${MEM_TOPK}_MEM_USE_FREQ${MEM_USE_FREQ}_PS${USE_PAGE_SEARCH}_USE_RATIO${PS_USE_RATIO}_GP_USE_FREQ{$GP_USE_FREQ}_GP_LOCK_NUMS${GP_LOCK_NUMS}_GP_CUT${GP_CUT}.csv
             echo "Searching... log file: ${SEARCH_LOG}"
             sync; echo 3 | sudo tee /proc/sys/vm/drop_caches; ${EXE_PATH}/tests/search_disk_index --data_type $DATA_TYPE \
               --dist_fn $DIST_FN \
@@ -204,7 +210,8 @@ case $2 in
               --use_page_search ${USE_PAGE_SEARCH} \
               --use_ratio ${PS_USE_RATIO} \
               --disk_file_path ${DISK_FILE_PATH} \
-              --use_sq ${USE_SQ}       > ${SEARCH_LOG} 
+              --use_sq ${USE_SQ} \
+              --metrics_csv_path ${SEARCH_CSV}       > ${SEARCH_LOG} 
             log_arr+=( ${SEARCH_LOG} )
           done
         done

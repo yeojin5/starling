@@ -193,6 +193,7 @@ namespace diskann {
 
     unsigned num_ios = 0;
     unsigned k = 0;
+    bool has_inflight_io = false;
 
     // cleared every iteration
     std::vector<unsigned> frontier;
@@ -212,6 +213,7 @@ namespace diskann {
 
     while (k < cur_list_size && num_ios < io_limit) {
       unsigned nk = cur_list_size;
+      cpu_timer.reset();
       // clear iteration state
       frontier.clear();
       frontier_nhoods.clear();
@@ -264,7 +266,9 @@ namespace diskann {
           }
           num_ios++;
         }
+        io_timer.reset();
         n_ops = reader->submit_reqs(frontier_read_reqs, ctx);
+        has_inflight_io = true;
         if (this->count_visited_nodes) {
 #pragma omp critical
           {
@@ -319,9 +323,25 @@ namespace diskann {
         compute_and_push_nbrs(node_buf, nk);
       }
 
+      if (stats != nullptr) {
+        stats->cpu_us += cpu_timer.elapsed();
+      }
+      cpu_timer.reset();
+
       // get last submitted io results, blocking
       if (!frontier.empty()) {
+        Timer wait_timer;
+        wait_timer.reset();
         reader->get_events(ctx, n_ops);
+        if (stats != nullptr) {
+          const double wait_us = wait_timer.elapsed();
+          stats->disk_idle_us += wait_us;
+          stats->cpu_idle_us += wait_us;
+          if (has_inflight_io) {
+            stats->io_us += io_timer.elapsed();
+          }
+        }
+        has_inflight_io = false;
       }
 
       // compute only the desired vectors in the pages - one for each page
@@ -340,6 +360,10 @@ namespace diskann {
             compute_and_push_nbrs(node_buf, nk);
           }
         }
+      }
+
+      if (stats != nullptr) {
+        stats->cpu_us += cpu_timer.elapsed();
       }
 
       // update best inserted position
@@ -477,6 +501,7 @@ namespace diskann {
 
     unsigned num_ios = 0;
     unsigned k = 0;
+    bool has_inflight_io = false;
 
     // cleared every iteration
     std::vector<unsigned> frontier;
@@ -493,9 +518,11 @@ namespace diskann {
     last_io_ids.reserve(2 * beam_width);
     std::vector<char> last_pages(SECTOR_LEN * beam_width * 2);
     int n_ops = 0;
+    Timer io_timer, cpu_timer;
 
     while (k < cur_list_size && num_ios < io_limit) {
       unsigned nk = cur_list_size;
+      cpu_timer.reset();
       // clear iteration state
       frontier.clear();
       frontier_nhoods.clear();
@@ -548,7 +575,9 @@ namespace diskann {
           }
           num_ios++;
         }
+        io_timer.reset();
         n_ops = reader->submit_reqs(frontier_read_reqs, ctx);
+        has_inflight_io = true;
         if (this->count_visited_nodes) {
 #pragma omp critical
           {
@@ -603,9 +632,25 @@ namespace diskann {
         compute_and_push_nbrs(node_buf, nk);
       }
 
+      if (stats != nullptr) {
+        stats->cpu_us += cpu_timer.elapsed();
+      }
+      cpu_timer.reset();
+
       // get last submitted io results, blocking
       if (!frontier.empty()) {
+        Timer wait_timer;
+        wait_timer.reset();
         reader->get_events(ctx, n_ops);
+        if (stats != nullptr) {
+          const double wait_us = wait_timer.elapsed();
+          stats->disk_idle_us += wait_us;
+          stats->cpu_idle_us += wait_us;
+          if (has_inflight_io) {
+            stats->io_us += io_timer.elapsed();
+          }
+        }
+        has_inflight_io = false;
       }
 
       // compute only the desired vectors in the pages - one for each page
@@ -624,6 +669,10 @@ namespace diskann {
             compute_and_push_nbrs(node_buf, nk);
           }
         }
+      }
+
+      if (stats != nullptr) {
+        stats->cpu_us += cpu_timer.elapsed();
       }
 
       // update best inserted position
@@ -841,6 +890,7 @@ namespace diskann {
 
     unsigned num_ios = 0;
     unsigned k = 0;
+    bool has_inflight_io = false;
 
     // cleared every iteration
     std::vector<unsigned> frontier;
@@ -860,6 +910,7 @@ namespace diskann {
 
     while (k < cur_list_size && num_ios < io_limit) {
       unsigned nk = cur_list_size;
+      cpu_timer.reset();
       // clear iteration state
       frontier.clear();
       frontier_nhoods.clear();
@@ -912,7 +963,9 @@ namespace diskann {
           }
           num_ios++;
         }
+        io_timer.reset();
         n_ops = reader->submit_reqs(frontier_read_reqs, ctx);
+        has_inflight_io = true;
         if (this->count_visited_nodes) {
 #pragma omp critical
           {
@@ -967,9 +1020,25 @@ namespace diskann {
         compute_and_push_nbrs(node_buf, nk);
       }
 
+      if (stats != nullptr) {
+        stats->cpu_us += cpu_timer.elapsed();
+      }
+      cpu_timer.reset();
+
       // get last submitted io results, blocking
       if (!frontier.empty()) {
+        Timer wait_timer;
+        wait_timer.reset();
         reader->get_events(ctx, n_ops);
+        if (stats != nullptr) {
+          const double wait_us = wait_timer.elapsed();
+          stats->disk_idle_us += wait_us;
+          stats->cpu_idle_us += wait_us;
+          if (has_inflight_io) {
+            stats->io_us += io_timer.elapsed();
+          }
+        }
+        has_inflight_io = false;
       }
 
       // compute only the desired vectors in the pages - one for each page
@@ -988,6 +1057,10 @@ namespace diskann {
             compute_and_push_nbrs(node_buf, nk);
           }
         }
+      }
+
+      if (stats != nullptr) {
+        stats->cpu_us += cpu_timer.elapsed();
       }
 
       // update best inserted position

@@ -22,6 +22,8 @@ namespace diskann {
     float total_us = 0;  // total time to process query in micros
     float io_us = 0;     // total time spent in IO
     float cpu_us = 0;    // total time spent in CPU
+    float cpu_idle_us = 0;  // total time CPU is blocked/idle while waiting
+    float disk_idle_us = 0;  // blocking wait time in IO completion path (pipeline stall)
 
     unsigned n_4k = 0;          // # of 4kB reads
     unsigned n_8k = 0;          // # of 8kB reads
