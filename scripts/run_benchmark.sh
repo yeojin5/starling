@@ -3,7 +3,33 @@
 set -e
 # set -x
 
-source config_local.sh
+CONFIG_FILE=${CONFIG_FILE:-config_local.sh}
+if [ ! -f "$CONFIG_FILE" ]; then
+  echo "Config file not found: $CONFIG_FILE"
+  exit 1
+fi
+source "$CONFIG_FILE"
+
+# Dataset configs in this repo sometimes define BASE_FILE instead of BASE_PATH.
+if [ -z "${BASE_PATH:-}" ] && [ -n "${BASE_FILE:-}" ]; then
+  BASE_PATH="$BASE_FILE"
+fi
+
+require_var() {
+  local name="$1"
+  if [ -z "${!name:-}" ]; then
+    echo "Required variable is empty: $name"
+    echo "Check dataset settings in $CONFIG_FILE"
+    exit 1
+  fi
+}
+
+require_var PREFIX
+require_var DATA_TYPE
+require_var DIST_FN
+require_var BASE_PATH
+require_var QUERY_FILE
+require_var GT_FILE
 
 INDEX_PREFIX_PATH="${PREFIX}_M${M}_R${R}_L${BUILD_L}_B${B}/"
 MEM_SAMPLE_PATH="${INDEX_PREFIX_PATH}SAMPLE_RATE_${MEM_RAND_SAMPLING_RATE}/"
@@ -50,6 +76,11 @@ mkdir -p ../indices && cd ../indices
 date
 case $2 in
   build)
+    require_var R
+    require_var BUILD_L
+    require_var B
+    require_var M
+    require_var BUILD_T
     check_dir_and_make_if_absent ${INDEX_PREFIX_PATH}
     echo "Building disk index..."
     time ${EXE_PATH}/tests/build_disk_index \
@@ -128,6 +159,16 @@ case $2 in
     if [ ! -f "$OLD_INDEX_FILE" ]; then
       OLD_INDEX_FILE=${INDEX_PREFIX_PATH}_disk.index
     fi
+    if [ ! -f "$OLD_INDEX_FILE" ]; then
+      echo "Disk index file not found: $OLD_INDEX_FILE"
+      echo "Run: ./run_benchmark.sh [debug/release] build first"
+      exit 1
+    fi
+    if [ ! -s "$OLD_INDEX_FILE" ]; then
+      echo "Disk index file is empty: $OLD_INDEX_FILE"
+      echo "Rebuild with: ./run_benchmark.sh [debug/release] build"
+      exit 1
+    fi
     #using sq index file to gp
     GP_DATA_TYPE=$DATA_TYPE
     if [ $USE_SQ -eq 1 ]; then 
@@ -187,6 +228,9 @@ case $2 in
           for T in ${T_LIST[@]}
           do
             SEARCH_LOG=${INDEX_PREFIX_PATH}search/search_SQ${USE_SQ}_K${K}_CACHE${CACHE}_BW${BW}_T${T}_MEML${MEM_L}_MEMK${MEM_TOPK}_MEM_USE_FREQ${MEM_USE_FREQ}_PS${USE_PAGE_SEARCH}_USE_RATIO${PS_USE_RATIO}_GP_USE_FREQ{$GP_USE_FREQ}_GP_LOCK_NUMS${GP_LOCK_NUMS}_GP_CUT${GP_CUT}.log
+            SEARCH_CSV=${INDEX_PREFIX_PATH}search/search_SQ${USE_SQ}_K${K}_CACHE${CACHE}_BW${BW}_T${T}_MEML${MEM_L}_MEMK${MEM_TOPK}_MEM_USE_FREQ${MEM_USE_FREQ}_PS${USE_PAGE_SEARCH}_USE_RATIO${PS_USE_RATIO}_GP_USE_FREQ{$GP_USE_FREQ}_GP_LOCK_NUMS${GP_LOCK_NUMS}_GP_CUT${GP_CUT}.csv
+            SEARCH_ROUND_CSV=${INDEX_PREFIX_PATH}search/round_SQ${USE_SQ}_K${K}_CACHE${CACHE}_BW${BW}_T${T}_MEML${MEM_L}_MEMK${MEM_TOPK}_MEM_USE_FREQ${MEM_USE_FREQ}_PS${USE_PAGE_SEARCH}_USE_RATIO${PS_USE_RATIO}_GP_USE_FREQ{$GP_USE_FREQ}_GP_LOCK_NUMS${GP_LOCK_NUMS}_GP_CUT${GP_CUT}.csv
+            SEARCH_RESULT_CSV_PREFIX=${INDEX_PREFIX_PATH}search/result_SQ${USE_SQ}_K${K}_CACHE${CACHE}_BW${BW}_T${T}_MEML${MEM_L}_MEMK${MEM_TOPK}_MEM_USE_FREQ${MEM_USE_FREQ}_PS${USE_PAGE_SEARCH}_USE_RATIO${PS_USE_RATIO}_GP_USE_FREQ{$GP_USE_FREQ}_GP_LOCK_NUMS${GP_LOCK_NUMS}_GP_CUT${GP_CUT}_gt768
             echo "Searching... log file: ${SEARCH_LOG}"
             sync; echo 3 | sudo tee /proc/sys/vm/drop_caches; ${EXE_PATH}/tests/search_disk_index --data_type $DATA_TYPE \
               --dist_fn $DIST_FN \
@@ -204,7 +248,10 @@ case $2 in
               --use_page_search ${USE_PAGE_SEARCH} \
               --use_ratio ${PS_USE_RATIO} \
               --disk_file_path ${DISK_FILE_PATH} \
-              --use_sq ${USE_SQ}       > ${SEARCH_LOG} 
+              --use_sq ${USE_SQ} \
+              --metrics_csv_path ${SEARCH_CSV} \
+              --result_csv_prefix ${SEARCH_RESULT_CSV_PREFIX} \
+              --round_metrics_csv_path ${SEARCH_ROUND_CSV}       > ${SEARCH_LOG} 
             log_arr+=( ${SEARCH_LOG} )
           done
         done

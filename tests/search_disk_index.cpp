@@ -58,6 +58,9 @@ int search_disk_index(
     const std::string& result_output_prefix, const std::string& query_file,
     const std::string& gt_file, 
     const std::string& disk_file_path,
+  const std::string& metrics_csv_path,
+  const std::string& result_csv_prefix,
+  const std::string& round_metrics_csv_path,
     const unsigned num_threads, const unsigned recall_at,
     const unsigned beamwidth, const unsigned num_nodes_to_cache,
     const _u32 search_io_limit, const std::vector<unsigned>& Lvec,
@@ -337,6 +340,28 @@ int search_disk_index(
     diskann::save_bin<float>(cur_result_path,
                              query_result_dists[test_id++].data(), query_num,
                              recall_at);
+
+    if (!result_csv_prefix.empty()) {
+      const auto& ids_for_L = query_result_ids[test_id - 1];
+      const auto& dists_for_L = query_result_dists[test_id - 1];
+      std::string csv_result_path =
+          result_csv_prefix + "_" + std::to_string(L) + "_results.csv";
+      std::ofstream result_csv(csv_result_path, std::ios::out | std::ios::trunc);
+      if (!result_csv.is_open()) {
+        std::cerr << "Failed to open result csv path: " << csv_result_path
+                  << std::endl;
+        return -1;
+      }
+      result_csv << "query_id,rank,neighbor_id,distance" << std::endl;
+      for (size_t q = 0; q < query_num; q++) {
+        for (unsigned r = 0; r < recall_at; r++) {
+          const size_t idx = q * recall_at + r;
+          result_csv << q << ',' << r << ',' << ids_for_L[idx] << ','
+                     << dists_for_L[idx] << std::endl;
+        }
+      }
+      result_csv.close();
+    }
   }
 
   diskann::aligned_free(query);
@@ -347,7 +372,8 @@ int search_disk_index(
 
 int main(int argc, char** argv) {
   std::string data_type, dist_fn, index_path_prefix, result_path_prefix,
-      query_file, gt_file, disk_file_path, mem_index_path;
+  query_file, gt_file, disk_file_path, mem_index_path, metrics_csv_path,
+  result_csv_prefix, round_metrics_csv_path;
   unsigned              num_threads, K, W, num_nodes_to_cache, search_io_limit;
   unsigned              mem_L;
   std::vector<unsigned> Lvec;
@@ -414,6 +440,12 @@ int main(int argc, char** argv) {
                        "The path of the disk file (_disk.index in the original DiskANN)");
     desc.add_options()("mem_index_path", po::value<std::string>(&mem_index_path)->default_value(""),
                        "The prefix path of the mem_index");
+    desc.add_options()("metrics_csv_path", po::value<std::string>(&metrics_csv_path)->default_value(""),
+               "CSV output path for search metrics");
+    desc.add_options()("result_csv_prefix", po::value<std::string>(&result_csv_prefix)->default_value(""),
+           "CSV output prefix for search results (saved as <prefix>_<L>_results.csv)");
+    desc.add_options()("round_metrics_csv_path", po::value<std::string>(&round_metrics_csv_path)->default_value(""),
+           "CSV output path for per-round wait metrics");
 
     po::variables_map vm;
     po::store(po::parse_command_line(argc, argv, desc), vm);
@@ -475,20 +507,25 @@ int main(int argc, char** argv) {
       return search_disk_index<float>(metric, index_path_prefix,
                                       mem_index_path,
                                       result_path_prefix, query_file, gt_file,
-                                      disk_file_path,
+                                      disk_file_path, metrics_csv_path,
+                                      result_csv_prefix,
+                                      round_metrics_csv_path,
                                       num_threads, K, W, num_nodes_to_cache,
                                       search_io_limit, Lvec, mem_L, use_page_search, use_ratio, use_reorder_data, use_sq);
     else if (data_type == std::string("int8"))
       return search_disk_index<int8_t>(metric, index_path_prefix,
                                        mem_index_path,
                                        result_path_prefix, query_file, gt_file,
-                                       disk_file_path,
+                                       disk_file_path, metrics_csv_path,
+                                       result_csv_prefix,
+                                       round_metrics_csv_path,
                                        num_threads, K, W, num_nodes_to_cache,
                                        search_io_limit, Lvec, mem_L, use_page_search, use_ratio, use_reorder_data);
     else if (data_type == std::string("uint8"))
       return search_disk_index<uint8_t>(
           metric, index_path_prefix, mem_index_path, result_path_prefix, query_file, gt_file,
-          disk_file_path, num_threads, K, W, num_nodes_to_cache, search_io_limit, Lvec, mem_L,
+          disk_file_path, metrics_csv_path, result_csv_prefix, round_metrics_csv_path,
+          num_threads, K, W, num_nodes_to_cache, search_io_limit, Lvec, mem_L,
           use_page_search, use_ratio, use_reorder_data);
     else {
       std::cerr << "Unsupported data type. Use float or int8 or uint8"
