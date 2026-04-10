@@ -8,7 +8,7 @@ source config_dataset.sh
 ##################
 #   Disk Build   #
 ##################
-R=48
+R=32
 BUILD_L=128
 M=32
 BUILD_T=8

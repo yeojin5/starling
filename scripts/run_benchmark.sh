@@ -67,9 +67,19 @@ case $1 in
     print_usage_and_exit
   ;;
 esac
-pushd $EXE_PATH
-make -j
-popd
+
+# Reuse an existing build tree unless the caller explicitly requests a rebuild.
+# This keeps repeated benchmark runs from recompiling the project every time.
+FORCE_REBUILD=${FORCE_REBUILD:-0}
+BUILD_MARKER="${EXE_PATH}/tests/build_disk_index"
+
+if [ "$FORCE_REBUILD" -eq 1 ] || [ ! -x "$BUILD_MARKER" ]; then
+  pushd $EXE_PATH
+  make -j
+  popd
+else
+  echo "Skipping compile step; existing build found at $EXE_PATH"
+fi
 
 mkdir -p ../indices && cd ../indices
 
@@ -92,7 +102,8 @@ case $2 in
       -L $BUILD_L \
       -B $B \
       -M $M \
-      -T $BUILD_T > ${INDEX_PREFIX_PATH}build.log
+      -T $BUILD_T \
+      --PQ_disk_bytes ${DISK_PQ:-0} > ${INDEX_PREFIX_PATH}build.log
     cp ${INDEX_PREFIX_PATH}_disk.index ${INDEX_PREFIX_PATH}_disk_beam_search.index
   ;;
   sq)

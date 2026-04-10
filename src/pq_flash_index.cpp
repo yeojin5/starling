@@ -9,6 +9,7 @@
 #include <omp.h>
 #include <atomic>
 #include <chrono>
+#include <cctype>
 #include <cmath>
 #include <cstdint>
 #include <iterator>
@@ -596,7 +597,31 @@ namespace diskann {
     this->disk_data_dim = this->data_dim;
     // will change later if we use PQ on disk or if we are using
     // inner product without PQ
-    this->disk_bytes_per_point = this->data_dim * sizeof(T);
+    auto parse_slice_dim = [](const std::string &path) -> _u64 {
+      const std::string marker = "_slice";
+      auto marker_pos = path.rfind(marker);
+      if (marker_pos == std::string::npos) {
+        return 0;
+      }
+      auto dot_pos = path.rfind('.');
+      if (dot_pos == std::string::npos || dot_pos <= marker_pos + marker.size()) {
+        return 0;
+      }
+      std::string slice_text = path.substr(marker_pos + marker.size(),
+                                           dot_pos - (marker_pos + marker.size()));
+      for (char ch : slice_text) {
+        if (!std::isdigit(static_cast<unsigned char>(ch))) {
+          return 0;
+        }
+      }
+      return static_cast<_u64>(std::stoull(slice_text));
+    };
+
+    this->search_slice_dim_ = parse_slice_dim(disk_index_file);
+    this->use_sliced_search_ = this->search_slice_dim_ > 0;
+    this->disk_bytes_per_point = this->use_sliced_search_
+                                     ? this->search_slice_dim_ * sizeof(T)
+                                     : this->data_dim * sizeof(T);
     if(use_sq_){
       this->disk_bytes_per_point = this->data_dim * sizeof(uint8_t);
       std::cout << "disk bytes per point "<<this->disk_bytes_per_point << std::endl;
@@ -960,6 +985,7 @@ namespace diskann {
     _u32                        best_medoid = 0;
     float                       best_dist = (std::numeric_limits<float>::max)();
     std::vector<SimpleNeighbor> medoid_dists;
+    const _u64 exact_dim = this->use_sliced_search_ ? this->search_slice_dim_ : aligned_dim;
     for (_u64 cur_m = 0; cur_m < num_medoids; cur_m++) {
       float cur_expanded_dist = dist_cmp_float->compare(
           query_float, centroid_data + aligned_dim * cur_m,
@@ -1162,11 +1188,11 @@ namespace diskann {
 
         T *node_fp_coords_copy = data_buf + (data_buf_idx * aligned_dim);
         data_buf_idx++;
-        memcpy(node_fp_coords_copy, node_fp_coords, disk_bytes_per_point);
+        memcpy(node_fp_coords_copy, node_fp_coords, exact_dim * sizeof(T));
         float cur_expanded_dist;
         if (!use_disk_index_pq) {
           cur_expanded_dist = dist_cmp->compare(query, node_fp_coords_copy,
-                                                (unsigned) aligned_dim);
+                                                (unsigned) exact_dim);
         } else {
           if (metric == diskann::Metric::INNER_PRODUCT)
             cur_expanded_dist = disk_pq_table.inner_product(

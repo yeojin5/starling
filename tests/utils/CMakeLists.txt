@@ -73,6 +73,9 @@ target_link_libraries(parse_freq_file ${PROJECT_NAME})
 
 add_executable(sq sq.cpp)
 target_link_libraries(sq ${PROJECT_NAME} ${DISKANN_ASYNC_LIB} ${DISKANN_TOOLS_TCMALLOC_LINK_OPTIONS})
+
+add_executable(slice_relayout slice_relayout.cpp)
+target_link_libraries(slice_relayout ${PROJECT_NAME} ${DISKANN_ASYNC_LIB} ${DISKANN_TOOLS_TCMALLOC_LINK_OPTIONS})
 # formatter
 # if (LINUX)
 # 	add_custom_command(TARGET gen_random_slice PRE_BUILD COMMAND clang-format -i ../../../include/*.h ../../../include/dll/*.h ../../../src/*.cpp  ../../../tests/*.cpp ../../../src/dll/*.cpp ../../../tests/utils/*.cpp)

@@ -98,7 +98,7 @@ namespace diskann {
     float *dist_scratch = query_scratch->aligned_dist_scratch;
     _u8 *  pq_coord_scratch = query_scratch->aligned_pq_coord_scratch;
 
-    Timer                 query_timer, io_timer, cpu_timer;
+    Timer query_timer, io_timer, cpu_timer;
     std::vector<Neighbor> retset(l_search + 1);
     tsl::robin_set<_u64> &visited = *(query_scratch->visited);
     tsl::robin_set<unsigned> &page_visited = *(query_scratch->page_visited);
@@ -129,11 +129,13 @@ namespace diskann {
                        dists_out);
     };
 
+    const _u64 exact_dim = this->use_sliced_search_ ? this->search_slice_dim_ : aligned_dim;
+
     auto compute_extact_dists_and_push = [&](const char* node_buf, const unsigned id) -> float {
       T *node_fp_coords_copy = data_buf;
-      memcpy(node_fp_coords_copy, node_buf, disk_bytes_per_point);
+      memcpy(node_fp_coords_copy, node_buf, exact_dim * sizeof(T));
       float cur_expanded_dist = dist_cmp->compare(query, node_fp_coords_copy,
-                                            (unsigned) aligned_dim);
+                                            (unsigned) exact_dim);
       full_retset.push_back(Neighbor(id, cur_expanded_dist, true));
       return cur_expanded_dist;
     };
@@ -184,9 +186,17 @@ namespace diskann {
       std::vector<float> mem_dists(mem_L);
       std::vector<T*> res = std::vector<T*>();
       mem_index_->search_with_tags(query, mem_L, mem_L, mem_tags.data(), mem_dists.data(), nullptr, res);
+      cpu_timer.reset();
       compute_and_add_to_retset(mem_tags.data(), std::min((unsigned)mem_L,(unsigned)l_search));
+      if (stats != nullptr) {
+        stats->cpu_us += (double) cpu_timer.elapsed();
+      }
     } else {
+      cpu_timer.reset();
       compute_and_add_to_retset(&best_medoid, 1);
+      if (stats != nullptr) {
+        stats->cpu_us += (double) cpu_timer.elapsed();
+      }
     }
 
     std::sort(retset.begin(), retset.begin() + cur_list_size);
@@ -264,6 +274,7 @@ namespace diskann {
           }
           num_ios++;
         }
+        io_timer.reset();
         n_ops = reader->submit_reqs(frontier_read_reqs, ctx);
         if (this->count_visited_nodes) {
 #pragma omp critical
@@ -275,6 +286,7 @@ namespace diskann {
       }
 
       // compute remaining nodes in the pages that are fetched in the previous round
+      cpu_timer.reset();
       for (size_t i = 0; i < last_io_ids.size(); ++i) {
         const unsigned last_io_id = last_io_ids[i];
         char    *sector_buf = last_pages.data() + i * SECTOR_LEN;
@@ -302,9 +314,13 @@ namespace diskann {
           compute_and_push_nbrs(vis_cand[j].second, nk);
         }
       }
+      if (stats != nullptr) {
+        stats->cpu_us += (double) cpu_timer.elapsed();
+      }
       last_io_ids.clear();
 
       // process cached nhoods
+      cpu_timer.reset();
       for (auto &cached_nhood : cached_nhoods) {
         auto id = cached_nhood.first;
         auto  global_cache_iter = coord_cache.find(cached_nhood.first);
@@ -318,14 +334,21 @@ namespace diskann {
         compute_extact_dists_and_push(node_buf, id);
         compute_and_push_nbrs(node_buf, nk);
       }
+      if (stats != nullptr) {
+        stats->cpu_us += (double) cpu_timer.elapsed();
+      }
 
       // get last submitted io results, blocking
       if (!frontier.empty()) {
         reader->get_events(ctx, n_ops);
+        if (stats != nullptr) {
+          stats->io_us += (double) io_timer.elapsed();
+        }
       }
 
       // compute only the desired vectors in the pages - one for each page
       // postpone remaining vectors to the next round
+      cpu_timer.reset();
       for (auto &frontier_nhood : frontier_nhoods) {
         char *sector_buf = frontier_nhood.second;
         unsigned pid = id2page_[frontier_nhood.first];
@@ -340,6 +363,9 @@ namespace diskann {
             compute_and_push_nbrs(node_buf, nk);
           }
         }
+      }
+      if (stats != nullptr) {
+        stats->cpu_us += (double) cpu_timer.elapsed();
       }
 
       // update best inserted position
@@ -423,6 +449,8 @@ namespace diskann {
       throw ANNException("Beamwidth can not be higher than MAX_N_SECTOR_READS",
                          -1, __FUNCSIG__, __FILE__, __LINE__);
 
+    Timer io_timer;
+
     // lambda to batch compute query<-> node distances in PQ space
     auto compute_pq_dists = [this, pq_coord_scratch, pq_dists](const unsigned *ids,
                                                             const _u64 n_ids,
@@ -433,11 +461,13 @@ namespace diskann {
                        dists_out);
     };
 
+    const _u64 exact_dim = this->use_sliced_search_ ? this->search_slice_dim_ : aligned_dim;
+
     auto compute_extact_dists_and_push = [&](const char* node_buf, const unsigned id) -> float {
       T *node_fp_coords_copy = data_buf;
-      memcpy(node_fp_coords_copy, node_buf, disk_bytes_per_point);
+      memcpy(node_fp_coords_copy, node_buf, exact_dim * sizeof(T));
       float cur_expanded_dist = dist_cmp->compare(query, node_fp_coords_copy,
-                                            (unsigned) aligned_dim);
+                                            (unsigned) exact_dim);
       full_retset.push_back(Neighbor(id, cur_expanded_dist, true));
       return cur_expanded_dist;
     };
@@ -548,6 +578,7 @@ namespace diskann {
           }
           num_ios++;
         }
+        io_timer.reset();
         n_ops = reader->submit_reqs(frontier_read_reqs, ctx);
         if (this->count_visited_nodes) {
 #pragma omp critical
@@ -606,6 +637,9 @@ namespace diskann {
       // get last submitted io results, blocking
       if (!frontier.empty()) {
         reader->get_events(ctx, n_ops);
+        if (stats != nullptr) {
+          stats->io_us += (double) io_timer.elapsed();
+        }
       }
 
       // compute only the desired vectors in the pages - one for each page
@@ -766,11 +800,14 @@ namespace diskann {
                        dists_out);
     };
 
+    const _u64 exact_dim = this->use_sliced_search_ ? this->search_slice_dim_ : aligned_dim;
+
     auto compute_extact_dists_and_push = [&](const char* node_buf, const unsigned id) -> float {
       float *node_fp_coords_copy = (float*) data_buf;
       uint8_t* node_sq_data = (uint8_t*)node_buf;
       /* memcpy(node_fp_coords_copy, node_buf, disk_bytes_per_point); */
-      for(uint32_t i = 0; i < aligned_dim; i+=8){
+      uint32_t round_down_exact_dim = (uint32_t)((exact_dim / 8) * 8);
+      for(uint32_t i = 0; i < round_down_exact_dim; i+=8){
         __m128i sq_vec = _mm_loadl_epi64((__m128i*) (node_sq_data + i));
         __m256 frac_vec = _mm256_load_ps(this->frac + i);
         __m256 min_vec = _mm256_load_ps(this->mins + i);
@@ -780,8 +817,11 @@ namespace diskann {
         sq_vec_f = _mm256_add_ps(sq_vec_f, min_vec);
         _mm256_storeu_ps(node_fp_coords_copy + i, sq_vec_f);
       }
+      for (uint32_t i = round_down_exact_dim; i < exact_dim; ++i) {
+        node_fp_coords_copy[i] = (float) node_sq_data[i] * this->frac[i] + this->mins[i];
+      }
       float cur_expanded_dist = dist_cmp_float->compare(query, node_fp_coords_copy,
-                                            (unsigned) aligned_dim);
+                                            (unsigned) exact_dim);
       full_retset.push_back(Neighbor(id, cur_expanded_dist, true));
       return cur_expanded_dist;
     };
@@ -832,9 +872,17 @@ namespace diskann {
       std::vector<float> mem_dists(mem_L);
       std::vector<T*> res = std::vector<T*>();
       mem_index_->search_with_tags((T*)query, mem_L, mem_L, mem_tags.data(), mem_dists.data(), nullptr, res);
+      cpu_timer.reset();
       compute_and_add_to_retset(mem_tags.data(), std::min((unsigned)mem_L,(unsigned)l_search));
+      if (stats != nullptr) {
+        stats->cpu_us += (double) cpu_timer.elapsed();
+      }
     } else {
+      cpu_timer.reset();
       compute_and_add_to_retset(&best_medoid, 1);
+      if (stats != nullptr) {
+        stats->cpu_us += (double) cpu_timer.elapsed();
+      }
     }
 
     std::sort(retset.begin(), retset.begin() + cur_list_size);
@@ -923,6 +971,7 @@ namespace diskann {
       }
 
       // compute remaining nodes in the pages that are fetched in the previous round
+      cpu_timer.reset();
       for (size_t i = 0; i < last_io_ids.size(); ++i) {
         const unsigned last_io_id = last_io_ids[i];
         char    *sector_buf = last_pages.data() + i * SECTOR_LEN;
@@ -950,9 +999,13 @@ namespace diskann {
           compute_and_push_nbrs(vis_cand[j].second, nk);
         }
       }
+      if (stats != nullptr) {
+        stats->cpu_us += (double) cpu_timer.elapsed();
+      }
       last_io_ids.clear();
 
       // process cached nhoods
+      cpu_timer.reset();
       for (auto &cached_nhood : cached_nhoods) {
         auto id = cached_nhood.first;
         auto  global_cache_iter = coord_cache.find(cached_nhood.first);
@@ -966,6 +1019,9 @@ namespace diskann {
         compute_extact_dists_and_push(node_buf, id);
         compute_and_push_nbrs(node_buf, nk);
       }
+      if (stats != nullptr) {
+        stats->cpu_us += (double) cpu_timer.elapsed();
+      }
 
       // get last submitted io results, blocking
       if (!frontier.empty()) {
@@ -974,6 +1030,7 @@ namespace diskann {
 
       // compute only the desired vectors in the pages - one for each page
       // postpone remaining vectors to the next round
+      cpu_timer.reset();
       for (auto &frontier_nhood : frontier_nhoods) {
         char *sector_buf = frontier_nhood.second;
         unsigned pid = id2page_[frontier_nhood.first];
@@ -988,6 +1045,9 @@ namespace diskann {
             compute_and_push_nbrs(node_buf, nk);
           }
         }
+      }
+      if (stats != nullptr) {
+        stats->cpu_us += (double) cpu_timer.elapsed();
       }
 
       // update best inserted position

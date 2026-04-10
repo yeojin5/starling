@@ -53,4 +53,10 @@ To run benchmarks, go to `scripts` directory, copy `config_sample.sh` to `config
 | `knn` | Find k-nearest neighbors|
 | `range` | Range search |
 
+For full-vector build and sliced-vector search, use the relayout utility in `tests/utils` to rewrite a relayouted disk index with a smaller payload slice:
+
+```bash
+slice_relayout <full_disk_index> <partition_file> <slice_dim> [output_index_file]
+```
+
 Configure datasets and parameters in `config_local.sh`

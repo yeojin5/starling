@@ -94,6 +94,8 @@ namespace diskann {
     std::vector<T*> mem_res = std::vector<T*>();
     mem_index_->search_with_tags(query1, mem_L, mem_L, mem_tags.data(), mem_dis.data(), mem_internal_indices.data(), mem_res);
 
+    const _u64 exact_dim = this->use_sliced_search_ ? this->search_slice_dim_ : aligned_dim;
+
     for (_u32 i = 0; i < mem_L; ++i) {
       // initialization set all distance to float::max()
       if (mem_dis[i] <= range) {
@@ -261,9 +263,9 @@ namespace diskann {
           for (unsigned j = 0; j < gp_layout_[pid].size(); ++j) {
             unsigned id = gp_layout_[pid][j];
             char *node_buf = sector_buf + j * max_node_len;
-            memcpy(data_buf, node_buf, disk_bytes_per_point);
+            memcpy(data_buf, node_buf, exact_dim * sizeof(T));
             float cur_expanded_dist = dist_cmp->compare(query, data_buf,
-                                                  (unsigned) aligned_dim);
+                                                  (unsigned) exact_dim);
             if (cur_expanded_dist <= range) {
               indices.push_back(id);
               distances.push_back(cur_expanded_dist);

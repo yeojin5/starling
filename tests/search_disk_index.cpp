@@ -2,6 +2,7 @@
 // Licensed under the MIT license.
 
 #include <atomic>
+#include <fstream>
 #include <cstring>
 #include <iomanip>
 #include <omp.h>
@@ -36,6 +37,21 @@
 #define WARMUP false
 
 namespace po = boost::program_options;
+
+struct SearchMetricsRow {
+  unsigned long long L = 0;
+  unsigned beamwidth = 0;
+  double qps = 0;
+  double mean_latency_us = 0;
+  double latency_999_us = 0;
+  double mean_ios = 0;
+  double mean_io_us = 0;
+  double mean_cpus = 0;
+  double load_mem = 0;
+  double cache_mem = 0;
+  double peak_mem = 0;
+  double recall = 0;
+};
 
 void print_stats(std::string category, std::vector<float> percentiles,
                  std::vector<float> results) {
@@ -215,6 +231,10 @@ int search_disk_index(
 
   std::vector<std::vector<uint32_t>> query_result_ids(Lvec.size());
   std::vector<std::vector<float>>    query_result_dists(Lvec.size());
+  std::vector<SearchMetricsRow>      metrics_rows;
+  if (!metrics_csv_path.empty()) {
+    metrics_rows.reserve(Lvec.size());
+  }
 
   uint32_t optimized_beamwidth = 2;
 
@@ -299,6 +319,10 @@ int search_disk_index(
         stats, query_num,
         [](const diskann::QueryStats& stats) { return stats.n_ios; });
 
+    auto mean_io_us = diskann::get_mean_stats<float>(
+      stats, query_num,
+      [](const diskann::QueryStats& stats) { return stats.io_us; });
+
     auto mean_cpus = diskann::get_mean_stats<float>(
         stats, query_num,
         [](const diskann::QueryStats& stats) { return stats.cpu_us; });
@@ -313,7 +337,7 @@ int search_disk_index(
     diskann::cout << std::setw(6) << L << std::setw(12) << optimized_beamwidth
                   << std::setw(16) << qps << std::setw(16) << mean_latency
                   << std::setw(16) << latency_999 << std::setw(16) << mean_ios
-                  << std::setw(16) << mean_cpus
+                  << std::setw(16) << mean_io_us << std::setw(16) << mean_cpus
                   << std::setw(20) << load_mem
                   << std::setw(20) << cache_mem
                   << std::setw(15) << getProcessPeakRSS();
@@ -321,7 +345,49 @@ int search_disk_index(
       diskann::cout << std::setw(16) << recall << std::endl;
     } else
       diskann::cout << std::endl;
+
+    if (!metrics_csv_path.empty()) {
+      metrics_rows.push_back(SearchMetricsRow{
+          L,
+          optimized_beamwidth,
+          qps,
+          mean_latency,
+          latency_999,
+          mean_ios,
+          mean_io_us,
+          mean_cpus,
+          static_cast<double>(load_mem),
+          static_cast<double>(cache_mem),
+          static_cast<double>(getProcessPeakRSS()),
+          recall,
+      });
+    }
+
     delete[] stats;
+  }
+
+  if (!metrics_csv_path.empty()) {
+    std::ofstream metrics_csv(metrics_csv_path, std::ios::out | std::ios::trunc);
+    if (!metrics_csv.is_open()) {
+      std::cerr << "Failed to open metrics csv path: " << metrics_csv_path
+                << std::endl;
+      return -1;
+    }
+
+    metrics_csv
+        << "L,beamwidth,qps,mean_latency_us,latency_999_us,mean_ios,mean_io_us,mean_cpus,load_mem_bytes,cache_mem_bytes,peak_mem_bytes,recall"
+        << std::endl;
+    metrics_csv.setf(std::ios_base::fixed, std::ios_base::floatfield);
+    metrics_csv << std::setprecision(6);
+    for (const auto& row : metrics_rows) {
+      metrics_csv << row.L << ',' << row.beamwidth << ',' << row.qps << ','
+                  << row.mean_latency_us << ',' << row.latency_999_us << ','
+                  << row.mean_ios << ',' << row.mean_io_us << ','
+                  << row.mean_cpus << ','
+                  << row.load_mem << ',' << row.cache_mem << ','
+                  << row.peak_mem << ',' << row.recall << std::endl;
+    }
+    metrics_csv.close();
   }
 
   diskann::cout << "Done searching. Now saving results " << std::endl;

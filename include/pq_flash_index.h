@@ -278,6 +278,8 @@ namespace diskann {
     bool use_sq_ = false;
     float* mins = nullptr;
     float* frac = nullptr;
+    bool use_sliced_search_ = false;
+    _u64 search_slice_dim_ = 0;
     // tsl::robin_map<_u32, char*> page_cache_;
     // tsl::robin_map<_u32, char*> node_cache_;
 
